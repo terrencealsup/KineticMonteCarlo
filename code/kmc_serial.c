@@ -1,12 +1,24 @@
-/*
-does KMC for specified initial profiles + parameters L, K, rate type (adatom or dH) and times
+/*******************************************************************************
+File: kmc_serial.c
+
+Authors: Anya Katsevich
+         Terrence Alsup
+
+High Performance Computing 2019, Final Project
+Date: May 17, 2019
+
+Run 1d Kinetic Monte Carlo in serial.
+
+Does KMC for specified initial profiles + parameters L, K, rate type (adatom or dH) and times
 recording average height at 0 and specified times T_1, T_2,...,T_{num_times}
 Input:
-command line: seed number 
+command line: seed number
 files: parameters.txt
-     
+
 Output: ./h.txt, a (num_times +1) x L array, storing avg. height profile at 0, T_1,T_2,...
-*/
+
+*******************************************************************************/
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <math.h>
@@ -19,6 +31,7 @@ Output: ./h.txt, a (num_times +1) x L array, storing avg. height profile at 0, T
 #define uniform64() genrand64_real3()
 #endif
 
+// Crystal site.
 typedef struct {
 	int height;
 	double Lrate, Rrate;
@@ -28,6 +41,9 @@ typedef struct {
 int my_itoa(int val, char* buf);
 double getRate(crystal_site *h, int i, int whichNbr, double K, int is_dH);
 void write2file(char *name, double *array, int dim1, int dim2);
+
+
+
 
 int main(int argc, char *argv[])
 {
@@ -43,17 +59,16 @@ int main(int argc, char *argv[])
 	double K;
 	int num_times;
 
-	
-	
-	// parse seed from command line
+
+	// Parse seed from command line.
 	long long unsigned int sd;
 	sd = atoi(argv[1]);
 	init_genrand64(sd);
 	char seed[20];
 	my_itoa(sd, seed);
 
-	
-	// read in parameter values
+
+	// Read in parameter values.
 	char parameters[100] = "./parameters.txt";
 
 	FILE *fid;
@@ -72,8 +87,8 @@ int main(int argc, char *argv[])
 	}
 	fclose(fid);
 
-	
-   
+  // Initialize the surface of the crystal.
+
 	//double hini[L];
 	//double avh[(num_times + 1)*L]; //record avh at each time T_i including 0
 	double *hini, *avh;
@@ -82,7 +97,7 @@ int main(int argc, char *argv[])
 	for (i = 0; i < L; i++) {
 		hini[i] = scale_factor*sin(2 * PI*((double)i) / ((double)L));
 	}
-	 
+
 	for (j = 0; j<(num_times+1)*L; j++) {
 			avh[j] = 0.0;
 	}
@@ -103,13 +118,15 @@ int main(int argc, char *argv[])
 	clock_t start, end;
 	double cpuTime;
 
+  // Compute the rates at each site.
+
 	start = clock();
 	for (m = 0; m<nsmpls; m++) {
 		printf("on %dth sample\n", m);
-		for (i = 0; i < L; i++) {		
+		for (i = 0; i < L; i++) {
 			h[i].height = (int) floor(hini[i]);
 			if (uniform64() < hini[i] - h[i].height)
-				h[i].height++;		
+				h[i].height++;
 			avh[i] += (double)h[i].height/((double) scale_factor*nsmpls);
 		}
 		ratesum = 0;
@@ -120,7 +137,7 @@ int main(int argc, char *argv[])
 		}
 
 		t = 0;
-		for (k = 0; k < num_times; k++) { 
+		for (k = 0; k < num_times; k++) {
 			int num_ts_ctr = 0;
 			printf("before, t = %lf, rate average = %lf\n", t,ratesum/L);
 			//this while loop performs KMC over each time interval, i.e. from T[k-1] (or 0) to T[k]
@@ -133,7 +150,7 @@ int main(int argc, char *argv[])
 				eta = ratesum*uniform64();
 				z2 = 0;
 				i = -1;
-				//different algorithms for different rates (to save time in the case of adatom rates)
+				// Different algorithms for different rates (to save time in the case of adatom rates).
 				if(is_dH){
 					while (z2<eta) {
 						i++;
@@ -151,14 +168,16 @@ int main(int argc, char *argv[])
 					}
 				}
 				else{
-					while(z2<eta){ 
-						i++; 
-						z2+= 2*h[i].Rrate; 
-                    } 
-					whichNbr=0;
-					if(uniform64() > 0.5)
-						whichNbr=1;
+          // Sample from the cdf of events.
+					while (z2 < eta) {
+						i++;
+						z2 += 2*h[i].Rrate;
+                    }
+					whichNbr = 0;
+					if (uniform64() > 0.5)
+						whichNbr = 1;
 				}
+        // Update the heights of the crystal.
 				siteupdatelist[0] = i;
 				if (whichNbr == 1) {
 					siteupdatelist[1] = h[siteupdatelist[0]].Lnbr;
@@ -174,7 +193,8 @@ int main(int argc, char *argv[])
 				h[siteupdatelist[0]].height--;
 				h[siteupdatelist[1]].height++;
 
-				for (j = 0; j< 4; j++) {
+        // Compute the new rates.
+				for (j = 0; j < 4; j++) {
 					i2 = siteupdatelist[j];
 					h[i2].Rrate = getRate(h, i2, 0, K, is_dH);
 					if(is_dH == 1)
@@ -189,11 +209,11 @@ int main(int argc, char *argv[])
 			}
 			printf("after, t = %lf, rate average = %lf, num ts = %d\n", t,ratesum/L, num_ts_ctr);
 
-			
-			for (i = 0; i < L; i++){ 
+
+			for (i = 0; i < L; i++){
 				avh[(k+1)*L + i] += (double)h[i].height / ((double)scale_factor*nsmpls);
 			}
-			
+
 		}
 	}
 
@@ -201,13 +221,16 @@ int main(int argc, char *argv[])
 	cpuTime = (end - start) / (CLOCKS_PER_SEC);
 	printf("\n");
     printf("KMC CPU time: %g minutes\n", cpuTime / 60.0);
-	
+
 	char str_avh[100] = "./h.txt";
 	write2file(str_avh, avh, num_times+1, L);
 
 	return 0;
 }
 
+/**
+Function to convert an int to a string.
+**/
 int my_itoa(int val, char* buf)
 {
 	const unsigned int radix = 10;
@@ -257,6 +280,9 @@ int my_itoa(int val, char* buf)
 	return len;
 }
 
+/**
+Calculate the rates at a crystal site.
+**/
 double getRate(crystal_site *h, int i, int whichNbr, double K, int is_dH) {
 	double rate;
 	if (is_dH) {
@@ -295,6 +321,9 @@ double getRate(crystal_site *h, int i, int whichNbr, double K, int is_dH) {
 	return rate;
 }
 
+/**
+Function to write the output into a file for plotting later.
+**/
 void write2file(char *name, double *array, int dim1, int dim2) {
 	FILE *fid;
 	int i, j;
@@ -306,4 +335,3 @@ void write2file(char *name, double *array, int dim1, int dim2) {
 	}
 	fclose(fid);
 }
-

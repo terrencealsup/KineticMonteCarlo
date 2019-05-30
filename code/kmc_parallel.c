@@ -43,17 +43,19 @@ void rateMax(crystal_site* h, int rank, int L_loc);
 
 
 /*
-Initialize the lattice for the block of size L_loc = L/P
+Initialize the lattice for the block of size L_loc = L/P.
+P is the number of processors.
 */
 void initialize_lattice(crystal_site* h, int L_loc, int rank, int L, double K, int P, double* R_locs, MPI_Comm comm) {
 
 	MPI_Status status1;
 
-	//initialize heights
+	// Initialize heights.
 	for (int i = 1; i < L_loc + 1; i++) {
 		int j = L_loc * rank + i;
 		double x = ((double) j) / L;
 
+		// Different initial condition.
 		/*
 		if (j > 0 && j < L/2) {
 			//double heightVal = exp(8 - 1/x - 1/(0.5 - x));
@@ -70,7 +72,7 @@ void initialize_lattice(crystal_site* h, int L_loc, int rank, int L, double K, i
 	}
 
 
-
+	// Send and recieve the ghost values for each processor.
 	MPI_Send(&(h[1].height), 1, MPI_INT, (rank - 1 + P) % P, 0, comm); // send h[1] to the left
 	MPI_Send(&(h[L_loc].height), 1, MPI_INT, (rank + 1) % P, 1, comm); // send h[L_loc] to the right
 
@@ -78,7 +80,7 @@ void initialize_lattice(crystal_site* h, int L_loc, int rank, int L, double K, i
 	MPI_Recv(&(h[0].height), 1, MPI_INT, (rank - 1 + P) % P, 1, comm, &status1); //receive to 0 from the left
 
 
-
+	// Initialize the rates.
 	for (int i = 1; i <= L_loc / 2; i++) {
 		h[i].rate = getRate(h, i, K);
 		R_locs[0] += 2 * h[i].rate;
@@ -92,6 +94,9 @@ void initialize_lattice(crystal_site* h, int L_loc, int rank, int L, double K, i
 }
 
 
+/**
+Compute the rates at the lattice site.
+**/
 double getRate(crystal_site *h, int i, double K) {
 	double rate;
 
@@ -109,10 +114,10 @@ double getRate(crystal_site *h, int i, double K) {
 
 
 
+/**
+Run serial KMC for a single section.
+**/
 int KMC_section(int section_num, crystal_site *h, double t_stop, double* R_locs, double K, int L_loc, int rank, int itr_num) {
-
-	//printf("Rank %d: at beginning of KMC section %d: R_loc%d = %f (passed in)\n", rank, section_num, section_num, R_locs[section_num]);
-
 
 	double t = 0;
 	double timetonext;
@@ -124,11 +129,11 @@ int KMC_section(int section_num, crystal_site *h, double t_stop, double* R_locs,
 		if (t + timetonext > t_stop)
 			break;
 
-		//draw from distribution{ j w.p.r_j / R_loc, j = 0,...,L_loc - 1 }
+		// Draw from distribution{ j w.p.r_j / R_loc, j = 0,...,L_loc - 1 }.
 
 		i = drawSite(h, R_locs[section_num], section_num, L_loc);
 
-		if (i ==0 || i == L_loc + 1) printf("BAD!!\n");
+		// Determine whether we jump left or right.
 		whichNbr = 0;
 		if (uniform64() > 0.5)
 			whichNbr = 1;
@@ -136,7 +141,7 @@ int KMC_section(int section_num, crystal_site *h, double t_stop, double* R_locs,
 			numEvents++;
 			siteupdatelist[0] = i;
 
-
+			// Update the sites.
 			if (whichNbr == 1) {
 				siteupdatelist[1] = i - 1;
 				siteupdatelist[2] = i - 2;
@@ -150,36 +155,34 @@ int KMC_section(int section_num, crystal_site *h, double t_stop, double* R_locs,
 			h[siteupdatelist[0]].height--;
 			h[siteupdatelist[1]].height++;
 
-
-			for (j = 0; j< 4; j++) {
+			// Update the rates for all sites that changed.
+			for (j = 0; j < 4; j++) {
 				i2 = siteupdatelist[j];
 				///printf("processor %d: i2 = %d\n", rank, i2);
 				if (i2 > 0 && i2 < L_loc + 1) {
 					double oldRate = 2 * h[i2].rate;
 					h[i2].rate = getRate(h, i2, K);
-          if(i2 <= L_loc/2){
+          if (i2 <= L_loc/2){
                  R_locs[0] -= oldRate;
                  R_locs[0] += 2*h[i2].rate;
-          }
-          else{
+          } else {
                 R_locs[1] -= oldRate;
                 R_locs[1] += 2*h[i2].rate;
           }
-
           }
-
        }
-
+		// Update the time to the event.
 		t += timetonext;
-
 	}
 
 	return numEvents;
   // printf("Rank %d: At end of KMC section %d: R_loc%d = %f\n\n", rank, section_num, section_num,R_locs[section_num]);
-
-
 }
 
+
+/**
+Compute the max rate for a block.
+**/
 void rateMax(crystal_site* h, int rank, int L_loc) {
 
 	int max_idx = 1;
@@ -190,16 +193,15 @@ void rateMax(crystal_site* h, int rank, int L_loc) {
 			max_idx = k;
 		}
 	}
-	printf("Rank %d: new max rate = %f at index %d, heights = %d %d %d\n", rank, max_rate, max_idx, h[max_idx - 1].height, h[max_idx].height, h[max_idx + 1].height);
-
-
 }
 
+
+/**
+Draw an event from the distribution P(E_i) = r_i/R.
+**/
 int drawSite(crystal_site* h, double R_loc, int section_num, int L_loc) {
 
-
-	double eta = R_loc*uniform64();
-
+	double eta = R_loc * uniform64();
 	double z2 = 0;
 
 	int i;
@@ -208,13 +210,14 @@ int drawSite(crystal_site* h, double R_loc, int section_num, int L_loc) {
 	else
 		i = L_loc / 2 ;
 
-	while (z2<eta) {
+	while (z2 < eta) {
 		i++;
 		z2 += 2 * h[i].rate;
 	}
-
 	return i;
 }
+
+
 
 int main(int argc, char * argv[]) {
 
@@ -244,7 +247,7 @@ int main(int argc, char * argv[]) {
 
 	fclose(fid);
 
-
+	// Rescale time like L^4.
 	Tfinal *= pow(L, 4);
 	if (rank == 0)
 		printf("L=%d, K=%f, T=%e, c = %f\n", L, K, Tfinal, c);
@@ -267,32 +270,35 @@ int main(int argc, char * argv[]) {
 	double t = 0;  // Keep track of the time.
 	int num_itr = 0;
 
+	// Keep track of how many events happen.
 	int total_events = 0;
 
 	while (t < Tfinal) {
 	//while (num_itr < 40) {
 
-
+		// Get the max rate for all the blocks.
 		MPI_Allreduce(&(R_locs[0]), &R_max0, 1, MPI_DOUBLE, MPI_MAX, MPI_COMM_WORLD);
 		MPI_Barrier(MPI_COMM_WORLD);
 		t_stop = n / R_max0;
+
+			// No events happen in this case.
 			if (t + t_stop > Tfinal)
 			  break;
 
 
+	 // Do parallel KMC on the first section.
    total_events += KMC_section(0, h, t_stop, R_locs, K, L_loc, rank, num_itr);
-
 
 		t += t_stop;
 
-
-
+		// Update the rates.
 		R_locs[1] -= 2 * h[L_loc].rate;
 		R_locs[1] -= 2 * h[L_loc - 1].rate;
  		//COMMUNICATE BETWEEN PROCESSORS
 		MPI_Comm comm = MPI_COMM_WORLD;
 		MPI_Status status1;
 
+		// Get and send ghost values.
 		MPI_Send(&(h[0].height), 1, MPI_INT, (rank - 1 + P) % P, 123, comm);
 		MPI_Send(&(h[1].height), 1, MPI_INT, (rank - 1 + P) % P, 124, comm);
 
@@ -300,44 +306,28 @@ int main(int argc, char * argv[]) {
 		MPI_Recv(&(h[L_loc + 1].height), 1, MPI_INT, (rank + 1) % P, 124, comm, &status1);
 
 
-/*
-			int sum = 0;
-			for (int i = 1; i < L_loc + 1; i++) {
-				sum += h[i].height;
-			}
-			printf("sum of heights = %d\n", sum);
-*/
-
-
 		h[L_loc].rate = getRate(h, L_loc, K);
 		h[L_loc - 1].rate = getRate(h, L_loc - 1, K);
-
-
 
 		R_locs[1] += 2 * h[L_loc].rate;
 		R_locs[1] += 2 * h[L_loc - 1].rate;
 
 
+		// Recompute the max for the second section.
 		MPI_Allreduce(&(R_locs[1]), &R_max1, 1, MPI_DOUBLE, MPI_MAX, MPI_COMM_WORLD);
 		MPI_Barrier(MPI_COMM_WORLD);
 
 		t_stop = n / R_max1;
 
-
+		// Run KMC in parallel on the second section.
 		total_events += KMC_section(1, h, t_stop, R_locs, K, L_loc, rank, num_itr);
-
-
 
 		t += t_stop;
 
-
+		// Get and send ghost values from the second section.
 		R_locs[0] -= 2 * h[1].rate;
 		R_locs[0] -= 2 * h[2].rate;
 
-
-
-		//MPI_Barrier(MPI_COMM_WORLD);
-		//COMMUNICATE BETWEEN PROCESSORS
 
 		MPI_Send(&(h[L_loc].height), 1, MPI_INT, (rank + 1) % P, 123, comm);
 		MPI_Send(&(h[L_loc + 1].height), 1, MPI_INT, (rank + 1) % P, 124, comm);
@@ -345,14 +335,6 @@ int main(int argc, char * argv[]) {
 		MPI_Recv(&(h[0].height), 1, MPI_INT, (rank - 1 + P) % P, 123, comm, &status1);
 		MPI_Recv(&(h[1].height), 1, MPI_INT, (rank - 1 + P) % P, 124, comm, &status1);
 
-
-/*
-			sum = 0;
-			for (int i = 1; i < L_loc + 1; i++) {
-				sum += h[i].height;
-			}
-			printf("sum of heights = %d\n", sum);
-			*/
 
 		h[1].rate = getRate(h, 1, K);
 		h[2].rate = getRate(h, 2, K);
@@ -364,7 +346,6 @@ int main(int argc, char * argv[]) {
 
 		if (rank == 0 && num_itr%1000 == 0)
 			printf("num_itr = %d, R_max1 = %f, new t = %f\n",  num_itr, R_max1, t);
-
 
 		num_itr++;
 	}
@@ -383,8 +364,7 @@ int main(int argc, char * argv[]) {
 		printf("Average number of events per processor per time = %f\n", avg/Tfinal);
 	}
 
-
-
+	// Write output to files.
 	char str_hFinal[100];
 	snprintf(str_hFinal, 100, "hFinal%02d.txt", rank);
 	myprint(L_loc, str_hFinal, h);
@@ -393,6 +373,10 @@ int main(int argc, char * argv[]) {
 
 }
 
+
+/**
+Convert an integer to a string.
+**/
 int my_itoa(int val, char* buf)
 {
 	const unsigned int radix = 10;
@@ -442,6 +426,10 @@ int my_itoa(int val, char* buf)
 	return len;
 }
 
+
+/**
+Write the output to a file.
+**/
 void myprint(long N, char* name, crystal_site* h) {
 	FILE *fid;
 
