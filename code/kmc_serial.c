@@ -69,12 +69,14 @@ int main(int argc, char *argv[])
 
 
 	// Read in parameter values.
-	char parameters[100] = "./parameters.txt";
+	char parameters[100] = "./parameters_serial.txt";
 
 	FILE *fid;
 	fid = fopen(parameters, "r");
 	fscanf(fid, "%d %d %lf %d %d", &is_dH, &L, &K, &nsmpls, &num_times);
 	printf("is_dH = %d,  L=%d, K=%f, nsmpls = %d, num_times =%d\n", is_dH, L, K, nsmpls, num_times);
+
+
 	int scale_factor = L;
 	//double T[num_times];
 	double *T;
